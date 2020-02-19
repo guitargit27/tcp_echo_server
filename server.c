@@ -12,7 +12,7 @@
 #define SA struct sockaddr
 #define read_buffer_size 1024
 
-void print_usage() 
+void print_usage()
 {
     printf ("\nTCP Echo Server\n\n");
     printf ("-p :   Mandatory: port number between 1-65535\n");
@@ -20,19 +20,22 @@ void print_usage()
     printf ("         Defaults to 180s\n");
 }
 
+// Handle the message transactions between client and server
 void echo_server(int sockfd)
 {
     char* buffer = malloc(read_buffer_size);
-    
+
     for (;;) {
         memset (buffer, 0, read_buffer_size);
 
         read (sockfd, buffer, sizeof(buffer));
         write (sockfd, buffer, sizeof(buffer));
     }
+
+    free(buffer);
 }
 
-
+// Setup the echo server socket connection
 void setup_server(int port)
 {
     int sockfd, connfd, len;
@@ -40,7 +43,7 @@ void setup_server(int port)
 
     // create the socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1) 
+    if (sockfd == -1)
     {
         fprintf (stderr, "Failed to create socket, exiting\n");
         exit (EXIT_FAILURE);
@@ -49,6 +52,7 @@ void setup_server(int port)
     {
         printf ("Socket created successfully\n");
     }
+    // TODO: change this to memset
     bzero(&servaddr, sizeof(servaddr));
 
     // Bind socket to IP and Port
@@ -56,12 +60,13 @@ void setup_server(int port)
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     servaddr.sin_port = htons(port);
 
+    // setup socket
     if ((bind(sockfd, (SA*)&servaddr, sizeof(servaddr))) != 0)
     {
         fprintf (stderr, "Couldn't bind socket\n");
         exit (EXIT_FAILURE);
     }
-    else 
+    else
     {
         printf ("Socket bind successful\n");
     }
@@ -71,59 +76,60 @@ void setup_server(int port)
         fprintf (stderr, "Couldn't listen on socket\n");
         exit (EXIT_FAILURE);
     }
-    else 
+    else
     {
         printf ("Socket listen successful\n");
-    }        
+    }
 
     connfd = accept(sockfd, (SA*)&cli, &len);
-    if (connfd <0) 
+    if (connfd <0)
     {
         fprintf (stderr, "Couldn't accept on socket\n");
         exit (EXIT_FAILURE);
     }
-    else 
+    else
     {
         printf ("Accepted Client\n");
-    }                
-    
+    }
+
     echo_server(connfd);
 
     close (sockfd);
 }
 
-int main(int argc, char **argv) 
+int main(int argc, char **argv)
 {
     int port = 0;
     int timeout = 180;
     int options = 0;
-    extern char *optarg;
 
     // Get Arguments and validate inputs
     while ((options = getopt (argc, argv, "p:t:?")) != -1)
     {
         switch (options)
         {
+            // port number
             case 'p':
                 if (isdigit(*optarg))
                 {
                     // still not quite right, will accept
                     // non-integers as long as they start with int
                     port = strtol(optarg, NULL, 10);
-                    if ((port < 1) || (port > 65535)) 
+                    if ((port < 1) || (port > 65535))
                     {
                         fprintf (stderr, "Invalid port number\n");
-                        print_usage();  
-                        exit (EXIT_FAILURE);                      
+                        print_usage();
+                        exit (EXIT_FAILURE);
                     }
                 } else
                 {
                     fprintf (stderr, "Invalid port number\n");
                     print_usage();
-                    exit (EXIT_FAILURE);                      
+                    exit (EXIT_FAILURE);
 
                 }
                 break;
+            // timeout value
             case 't':
                 if (isdigit(*optarg))
                 {
@@ -134,13 +140,13 @@ int main(int argc, char **argv)
                 {
                     fprintf (stderr, "Invalid timeout value\n");
                     print_usage();
-                    exit (EXIT_FAILURE);                      
+                    exit (EXIT_FAILURE);
 
                 }
-                break;                
+                break;
             case '?':
                 print_usage();
-                exit (EXIT_SUCCESS);                      
+                exit (EXIT_SUCCESS);
 
         }
     }
@@ -148,7 +154,7 @@ int main(int argc, char **argv)
     if ((port <= 0) || (argc < 2))
     {
         print_usage();
-        exit (EXIT_FAILURE);          
+        exit (EXIT_FAILURE);
     } else
     {
         setup_server(port);
