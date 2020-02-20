@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #define SA struct sockaddr
-#define send_buffer_size 1024
+#define max_size 16384
 
 int isValidIPAddress(char *ip_addr)
 {
@@ -28,18 +28,55 @@ void print_usage()
     printf ("-i :   Mandatory: IP address\n");
 }
 
+// Accept user input, send to Echo Server, print return message
+// TODO: need to use something like msgpack to determine the data length
+// Right now, would not read full message if data was larger than server buffer size
 void chat_server(int sockfd)
 {
+    int send_buffer_size = 1024;
     char* buffer = malloc(send_buffer_size);
+    int c = EOF;
+    int i = 0;
 
-    memset (buffer, 0, send_buffer_size);
-    strncpy(buffer, "hello\n", 6);
+    // Handle user input from the command prompt
+    for (;;)
+    {
+        memset (buffer, 0, send_buffer_size);
+        i = 0;
+        send_buffer_size = 1024;
 
-    write (sockfd, buffer, sizeof(buffer));
+        printf ("> ");
+        while ((c = getchar()) != '\n')
+        {
+            buffer[i] = c;
+            i = i + 1;
 
-    memset (buffer, 0, send_buffer_size);
-    read (sockfd, buffer, sizeof(buffer));
-    printf ("Received message: %s", buffer);
+            // realloc if max sized reached
+            if (i >= send_buffer_size)
+            {
+                send_buffer_size = max_size;
+                buffer = realloc(buffer, send_buffer_size);
+            }
+            if (i > max_size)
+            {
+                fprintf (stderr, "Buffer too large to send, exiting\n");
+
+                free(buffer);
+                return;
+            }
+        }
+
+        // Write user input out to server
+        buffer[i] = '\0';
+        write (sockfd, buffer, strlen(buffer));
+
+        // Read return from server, display to screen
+        memset (buffer, 0, send_buffer_size);
+        read (sockfd, buffer, send_buffer_size);
+        printf ("Echoed message: %s\n", buffer);
+    }
+
+    free(buffer);
 }
 
 void setup_client(int port, char* ip_addr)
@@ -82,7 +119,6 @@ void setup_client(int port, char* ip_addr)
     close(sockfd);
 
 }
-
 
 int main(int argc, char **argv)
 {

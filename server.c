@@ -21,15 +21,15 @@ void print_usage()
 }
 
 // Handle the message transactions between client and server
-void echo_server(int sockfd)
+void echo_server(int connfd)
 {
     char* buffer = malloc(read_buffer_size);
 
     for (;;) {
         memset (buffer, 0, read_buffer_size);
 
-        read (sockfd, buffer, sizeof(buffer));
-        write (sockfd, buffer, sizeof(buffer));
+        read (connfd, buffer, read_buffer_size);
+        write (connfd, buffer, read_buffer_size);
     }
 
     free(buffer);
@@ -81,19 +81,23 @@ void setup_server(int port)
         printf ("Socket listen successful\n");
     }
 
+    len = sizeof(cli);
     connfd = accept(sockfd, (SA*)&cli, &len);
-    if (connfd <0)
+    if (connfd < 0)
     {
         fprintf (stderr, "Couldn't accept on socket\n");
         exit (EXIT_FAILURE);
     }
     else
     {
-        printf ("Accepted Client\n");
+        printf ("Accepted Client");
+
     }
 
+    // Handle echo server
     echo_server(connfd);
 
+    close (connfd);
     close (sockfd);
 }
 
