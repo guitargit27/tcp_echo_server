@@ -1,8 +1,10 @@
 #include <ctype.h>
 #include <errno.h>
-#include <stdio.h>
+#include <msgpack.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <arpa/inet.h>
@@ -11,7 +13,9 @@
 #include <unistd.h>
 
 #define SA struct sockaddr
-#define max_size 16384
+#define MAX_SIZE 16384
+
+static char *pack(char* buffer, uint32_t *size);
 
 int isValidIPAddress(char *ip_addr)
 {
@@ -19,6 +23,60 @@ int isValidIPAddress(char *ip_addr)
     int result = inet_pton(AF_INET, ip_addr, &(sa.sin_addr));
 
     return result;
+}
+
+static char *pack(char* buffer, uint32_t *size) {
+
+    // Pack data into msgpack format
+    char *buf = NULL;
+    msgpack_sbuffer sbuf;
+    msgpack_sbuffer_init(&sbuf);
+    msgpack_packer pck;
+    msgpack_packer_init(&pck, &sbuf, msgpack_sbuffer_write);
+
+    msgpack_pack_array(&pck, 3);
+    msgpack_pack_int32(&pck, strlen(buffer));
+    msgpack_pack_bin(&pck, 4);
+    msgpack_pack_bin_body(&pck, "Text", 4);
+    msgpack_pack_bin(&pck, strlen(buffer));
+    msgpack_pack_bin_body(&pck, buffer, strlen(buffer));
+
+    *size = sbuf.size + sizeof(MAX_SIZE) + 1;
+    buf = malloc(*size);
+    uint32_t net_size = htonl(*size);
+    memcpy(buf, (char *)&net_size, sizeof(MAX_SIZE));
+    memcpy(buf + sizeof(MAX_SIZE), sbuf.data, sbuf.size);
+    msgpack_sbuffer_destroy(&sbuf);
+    printf ("Size: %u\n", *size);
+
+    return buf;
+}
+
+char* unpack(char* buffer, uint32_t size) {
+    msgpack_unpacker* unp = msgpack_unpacker_new(size);
+    memcpy(msgpack_unpacker_buffer(unp), buffer, size);
+    msgpack_unpacker_buffer_consumed(unp, size);
+
+    msgpack_unpacked msg;
+    msgpack_unpacked_init(&msg);
+    char *data;
+    int echo_length = 0;
+
+    if (msgpack_unpacker_next(unp, &msg))
+    {
+        msgpack_object root = msg.data;
+        if (root.type == MSGPACK_OBJECT_ARRAY) {
+            echo_length = root.via.array.ptr[0].via.i64;
+            if (echo_length > 0)
+            {
+                data = malloc(echo_length);
+                strncpy(data, root.via.array.ptr[2].via.str.ptr, echo_length);
+            }
+        }
+    }
+
+    msgpack_unpacked_destroy(&msg);
+    return data;
 }
 
 void print_usage()
@@ -35,6 +93,11 @@ void chat_server(int sockfd)
 {
     int send_buffer_size = 1024;
     char* buffer = malloc(send_buffer_size);
+    char* echo;
+    int bytes_read = 0;
+
+    uint32_t size = 0;
+
     int c = EOF;
     int i = 0;
 
@@ -42,6 +105,7 @@ void chat_server(int sockfd)
     for (;;)
     {
         memset (buffer, 0, send_buffer_size);
+
         i = 0;
         send_buffer_size = 1024;
 
@@ -54,10 +118,10 @@ void chat_server(int sockfd)
             // realloc if max sized reached
             if (i >= send_buffer_size)
             {
-                send_buffer_size = max_size;
+                send_buffer_size = MAX_SIZE;
                 buffer = realloc(buffer, send_buffer_size);
             }
-            if (i > max_size)
+            if (i > MAX_SIZE)
             {
                 fprintf (stderr, "Buffer too large to send, exiting\n");
 
@@ -68,12 +132,24 @@ void chat_server(int sockfd)
 
         // Write user input out to server
         buffer[i] = '\0';
-        write (sockfd, buffer, strlen(buffer));
 
-        // Read return from server, display to screen
-        memset (buffer, 0, send_buffer_size);
-        read (sockfd, buffer, send_buffer_size);
-        printf ("Echoed message: %s\n", buffer);
+        // test pack
+        char* send_buffer = malloc(send_buffer_size);
+        memset (send_buffer, 0, send_buffer_size);
+        send_buffer = pack(buffer, &size);
+        printf ("pack %lu: %d bytes\n", strlen(send_buffer), size);
+
+        write (sockfd, send_buffer, size);
+        free(send_buffer);
+
+        bytes_read = read (sockfd, buffer, send_buffer_size);
+        printf ("Bytes read: %i\n", bytes_read);
+
+        char* echo = malloc(send_buffer_size);
+        memset (echo, 0, send_buffer_size);
+        echo = unpack(buffer, size - sizeof(MAX_SIZE));
+        printf ("Echoed text: %s\n", echo);
+        free(echo);
     }
 
     free(buffer);

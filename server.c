@@ -1,8 +1,10 @@
 #include <ctype.h>
 #include <errno.h>
-#include <stdio.h>
+#include <msgpack.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -10,7 +12,13 @@
 #include <unistd.h>
 
 #define SA struct sockaddr
-#define read_buffer_size 1024
+#define MAX_READ_SIZE 1024
+
+typedef struct read_data
+{
+    int size;
+    char* data;
+} read_data;
 
 void print_usage()
 {
@@ -23,16 +31,69 @@ void print_usage()
 // Handle the message transactions between client and server
 void echo_server(int connfd)
 {
-    char* buffer = malloc(read_buffer_size);
+    //char* buffer = malloc(MAX_READ_SIZE);
+    msgpack_sbuffer* mbuffer = msgpack_sbuffer_new();
+    msgpack_packer* pk = msgpack_packer_new(mbuffer, msgpack_sbuffer_write);
+    char* buffer = malloc(MAX_READ_SIZE);
+    uint32_t buffer_size = 0;
+    int bytes_read = 0;
 
     for (;;) {
-        memset (buffer, 0, read_buffer_size);
+        //memset (buffer, 0, MAX_READ_SIZE);
+        msgpack_sbuffer_clear(mbuffer);
+        msgpack_pack_array(pk, 2);
 
-        read (connfd, buffer, read_buffer_size);
-        write (connfd, buffer, read_buffer_size);
+        // Read size
+        //read (connfd, buffer, MAX_READ_SIZE);
+        bytes_read = read (connfd, (char*)&buffer_size, sizeof(buffer_size));
+        if (bytes_read > 0)
+        {
+            buffer_size = ntohl(buffer_size);
+
+            if (buffer_size > 0)
+            {
+                printf ("size: %i\n", buffer_size);
+            } else
+            {
+                write(connfd, "ERR", 4);
+                fprintf (stderr, "Couldn't obtain size of data, exiting");
+                break;
+            }
+        } else
+        {
+            write(connfd, "ERR", 4);
+            fprintf (stderr, "Couldn't obtain size of data, exiting");
+            break;
+        }
+
+        for (;;)
+        {
+            bytes_read = read (connfd, buffer, MAX_READ_SIZE);
+            write(connfd, buffer, bytes_read);
+            buffer_size -= bytes_read;
+            // if (buffer_size <= 0)
+            // {
+            //     break;
+            // }
+            break;
+        }
+
+        /* deserializes it. */
+        // msgpack_unpacked msg;
+        // msgpack_unpacked_init(&msg);
+        // msgpack_unpack_return ret = msgpack_unpack_next(&msg, mbuffer->data, mbuffer->size, NULL);
+
+        // /* prints the deserialized object. */
+        // msgpack_object obj = msg.data;
+        // msgpack_object_print(stdout, obj);  /*=> ["Hello", "MessagePack"] */
+
+        // Read data
+        //write (connfd, mbuffer, MAX_READ_SIZE);
     }
 
-    free(buffer);
+    msgpack_sbuffer_free(mbuffer);
+    msgpack_packer_free(pk);
+    //free(buffer);
 }
 
 // Setup the echo server socket connection
@@ -90,14 +151,12 @@ void setup_server(int port)
     }
     else
     {
-        printf ("Accepted Client");
-
+        printf ("Accepted Client\n");
     }
 
     // Handle echo server
     echo_server(connfd);
 
-    close (connfd);
     close (sockfd);
 }
 
