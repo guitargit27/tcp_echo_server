@@ -14,12 +14,6 @@
 #define SA struct sockaddr
 #define MAX_READ_SIZE 1024
 
-typedef struct read_data
-{
-    int size;
-    char* data;
-} read_data;
-
 void print_usage()
 {
     printf ("\nTCP Echo Server\n\n");
@@ -31,20 +25,12 @@ void print_usage()
 // Handle the message transactions between client and server
 void echo_server(int connfd)
 {
-    //char* buffer = malloc(MAX_READ_SIZE);
-    msgpack_sbuffer* mbuffer = msgpack_sbuffer_new();
-    msgpack_packer* pk = msgpack_packer_new(mbuffer, msgpack_sbuffer_write);
     char* buffer = malloc(MAX_READ_SIZE);
     uint32_t buffer_size = 0;
     int bytes_read = 0;
 
     for (;;) {
-        //memset (buffer, 0, MAX_READ_SIZE);
-        msgpack_sbuffer_clear(mbuffer);
-        msgpack_pack_array(pk, 2);
-
         // Read size
-        //read (connfd, buffer, MAX_READ_SIZE);
         bytes_read = read (connfd, (char*)&buffer_size, sizeof(buffer_size));
         if (bytes_read > 0)
         {
@@ -66,34 +52,21 @@ void echo_server(int connfd)
             break;
         }
 
+        // read the remaining buffer length, and echo
+        // it back to the socket
         for (;;)
         {
+            if (buffer_size <= sizeof(buffer_size))
+            {
+                break;
+            }
             bytes_read = read (connfd, buffer, MAX_READ_SIZE);
             write(connfd, buffer, bytes_read);
             buffer_size -= bytes_read;
-            // if (buffer_size <= 0)
-            // {
-            //     break;
-            // }
-            break;
         }
-
-        /* deserializes it. */
-        // msgpack_unpacked msg;
-        // msgpack_unpacked_init(&msg);
-        // msgpack_unpack_return ret = msgpack_unpack_next(&msg, mbuffer->data, mbuffer->size, NULL);
-
-        // /* prints the deserialized object. */
-        // msgpack_object obj = msg.data;
-        // msgpack_object_print(stdout, obj);  /*=> ["Hello", "MessagePack"] */
-
-        // Read data
-        //write (connfd, mbuffer, MAX_READ_SIZE);
     }
 
-    msgpack_sbuffer_free(mbuffer);
-    msgpack_packer_free(pk);
-    //free(buffer);
+    free(buffer);
 }
 
 // Setup the echo server socket connection
@@ -160,6 +133,7 @@ void setup_server(int port)
     close (sockfd);
 }
 
+// handle user inputs and call the server
 int main(int argc, char **argv)
 {
     int port = 0;

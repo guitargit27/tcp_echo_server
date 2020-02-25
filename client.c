@@ -25,15 +25,23 @@ int isValidIPAddress(char *ip_addr)
     return result;
 }
 
-static char *pack(char* buffer, uint32_t *size) {
-
-    // Pack data into msgpack format
+// pack string buffer using msgpack
+//
+// buffer  :    text input to pack
+// full_size :  size of total buffer (msgpack serialized
+//                data plus a int to store length)
+// return   :   buf [uint32_t len, msgpack packed buffer]
+static char *pack(char* buffer, uint32_t *full_size)
+{
     char *buf = NULL;
     msgpack_sbuffer sbuf;
     msgpack_sbuffer_init(&sbuf);
     msgpack_packer pck;
     msgpack_packer_init(&pck, &sbuf, msgpack_sbuffer_write);
 
+    // pack the user input length, followed by "Text"
+    // followed by the user string input
+    // format is arbitrary, just wanted to test some features
     msgpack_pack_array(&pck, 3);
     msgpack_pack_int32(&pck, strlen(buffer));
     msgpack_pack_bin(&pck, 4);
@@ -41,17 +49,25 @@ static char *pack(char* buffer, uint32_t *size) {
     msgpack_pack_bin(&pck, strlen(buffer));
     msgpack_pack_bin_body(&pck, buffer, strlen(buffer));
 
-    *size = sbuf.size + sizeof(MAX_SIZE) + 1;
-    buf = malloc(*size);
-    uint32_t net_size = htonl(*size);
+    // build a buffer that contains the full data size
+    // to send over wire, basically all the msgpack stuff
+    // and prepend the length of the buffer for the server
+    *full_size = sbuf.size + sizeof(MAX_SIZE) + 1;
+    buf = malloc(*full_size);
+    uint32_t net_size = htonl(*full_size);
     memcpy(buf, (char *)&net_size, sizeof(MAX_SIZE));
     memcpy(buf + sizeof(MAX_SIZE), sbuf.data, sbuf.size);
     msgpack_sbuffer_destroy(&sbuf);
-    printf ("Size: %u\n", *size);
+    printf ("Size: %u\n", *full_size);
 
     return buf;
 }
 
+// unpack buffer using msgpack
+//
+// buffer  :    msgpack data to unpack
+// size    :    size of msgpack data to unpack
+// return   :   data, original string entered from client
 char* unpack(char* buffer, uint32_t size) {
     msgpack_unpacker* unp = msgpack_unpacker_new(size);
     memcpy(msgpack_unpacker_buffer(unp), buffer, size);
@@ -62,6 +78,8 @@ char* unpack(char* buffer, uint32_t size) {
     char *data;
     int echo_length = 0;
 
+    // unpack the individual msgpack object elements
+    // TODO: remove hardcoded element indices
     if (msgpack_unpacker_next(unp, &msg))
     {
         msgpack_object root = msg.data;
@@ -89,10 +107,11 @@ void print_usage()
 // Accept user input, send to Echo Server, print return message
 // TODO: need to use something like msgpack to determine the data length
 // Right now, would not read full message if data was larger than server buffer size
-void chat_server(int sockfd)
+void echo_client(int sockfd)
 {
     int send_buffer_size = 1024;
     char* buffer = malloc(send_buffer_size);
+    char* buffer_address = buffer;
     char* echo;
     int bytes_read = 0;
 
@@ -130,31 +149,46 @@ void chat_server(int sockfd)
             }
         }
 
-        // Write user input out to server
-        buffer[i] = '\0';
+        if (i != 0)
+        {
+            // Write user input out to server
+            buffer[i] = '\0';
 
-        // test pack
-        char* send_buffer = malloc(send_buffer_size);
-        memset (send_buffer, 0, send_buffer_size);
-        send_buffer = pack(buffer, &size);
-        printf ("pack %lu: %d bytes\n", strlen(send_buffer), size);
+            // test pack
+            char* send_buffer = malloc(send_buffer_size);
+            memset (send_buffer, 0, send_buffer_size);
+            send_buffer = pack(buffer, &size);
+            printf ("pack %lu: %d bytes\n", strlen(send_buffer), size);
 
-        write (sockfd, send_buffer, size);
-        free(send_buffer);
+            write (sockfd, send_buffer, size);
+            free(send_buffer);
 
-        bytes_read = read (sockfd, buffer, send_buffer_size);
-        printf ("Bytes read: %i\n", bytes_read);
+            // read all bytes from the server
+            bytes_read = 0;
+            int c = 0;
+            buffer_address = buffer;
+            memset(buffer, 0, send_buffer_size);
+            while (bytes_read < (size - sizeof(MAX_SIZE)))
+            {
+                c = read (sockfd, buffer_address, send_buffer_size - bytes_read);
+                bytes_read += c;
+                buffer_address += c;
+                printf ("Bytes read: %i\n", bytes_read);
+            }
 
-        char* echo = malloc(send_buffer_size);
-        memset (echo, 0, send_buffer_size);
-        echo = unpack(buffer, size - sizeof(MAX_SIZE));
-        printf ("Echoed text: %s\n", echo);
-        free(echo);
+            // unpack and echo output to the screen
+            char* echo = malloc(send_buffer_size);
+            memset (echo, 0, send_buffer_size);
+            echo = unpack(buffer, size - sizeof(MAX_SIZE));
+            printf ("Echoed text: %s\n", echo);
+            free(echo);
+        }
     }
 
     free(buffer);
 }
 
+// setup the client socket connection to the server
 void setup_client(int port, char* ip_addr)
 {
     int sockfd, connfd;
@@ -189,13 +223,13 @@ void setup_client(int port, char* ip_addr)
         printf ("Connected to server at %s:%d\n", ip_addr, port);
     }
 
-    // Chat Server
-    chat_server(sockfd);
+    // Echo Client
+    echo_client(sockfd);
 
     close(sockfd);
-
 }
 
+// accept user inputs and launch the client
 int main(int argc, char **argv)
 {
     int port = 0;
@@ -251,7 +285,14 @@ int main(int argc, char **argv)
         }
     }
 
-    setup_client(port, ip_addr);
+     if ((port <= 0) || (argc < 3))
+    {
+        print_usage();
+        exit (EXIT_FAILURE);
+    } else
+    {
+        setup_client(port, ip_addr);
+    }
 
     return 0;
 }
