@@ -1,0 +1,12 @@
+*.swp
+
+# Libraries
+*.lib
+*.a
+
+# Shared Objects
+*.so
+*.so.*
+
+# Executables
+*.out
